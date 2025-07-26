@@ -67,7 +67,7 @@ To run the pipeline on the example data provided in this project, use the follow
 
 ```bash
 crisprscope build \
-  --input /uufs/chpc.utah.edu/common/home/u6046470/clement/projects/20230818_scCRISPR/analysis/01_run_on_20200804_BaF3_revision \
+  --input <path_to_data_dir> \
   --output crisprscope_output.h5ad \
   --verbose
 ```
