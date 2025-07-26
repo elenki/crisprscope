@@ -92,11 +92,8 @@ class CRISPRScopeAnnDataBuilder:
         """Constructs the advanced zygosity and allele layers."""
         logger.info("Building advanced layers (zygosity, alleles)...")
         
-        # Zygosity encoding: 0=WT/WT, 1=WT/Mut, 2=Mut/Mut, 3=Mut/Mut2, -1=NoData
         zygosity_matrix = np.full((self.n_obs, self.n_vars), -1, dtype=np.int8)
         alleles_matrix = np.empty((self.n_obs, self.n_vars), dtype=object)
-
-        # Get the reference sequence for each amplicon for comparison
         ref_seqs = self.amplicons['sequence'].to_dict()
 
         for i, cell_bc in enumerate(self.cell_barcodes):
@@ -113,23 +110,21 @@ class CRISPRScopeAnnDataBuilder:
                 mod_reads = total_reads - ref_reads
                 mod_pct = (mod_reads / total_reads) * 100 if total_reads > 0 else 0
 
-                # --- Zygosity Classification ---
                 if mod_pct < 20:
-                    zygosity_matrix[i, j] = 0 # WT/WT
+                    zygosity_matrix[i, j] = 0
                 elif 20 <= mod_pct < 80:
-                    zygosity_matrix[i, j] = 1 # WT/Mut
-                else: # mod_pct >= 80
+                    zygosity_matrix[i, j] = 1
+                else:
                     sorted_alleles = sorted(allele_summary.items(), key=lambda item: item[1], reverse=True)
                     if len(sorted_alleles) > 1:
                         second_allele_freq = (sorted_alleles[1][1] / total_reads) * 100
                         if second_allele_freq < 20:
-                            zygosity_matrix[i, j] = 2 # Mut/Mut (Homozygous)
+                            zygosity_matrix[i, j] = 2
                         else:
-                            zygosity_matrix[i, j] = 3 # Mut/Mut2 (Compound Heterozygous)
+                            zygosity_matrix[i, j] = 3
                     else:
-                        zygosity_matrix[i, j] = 2 # Mut/Mut (Only one allele type found)
+                        zygosity_matrix[i, j] = 2
                 
-                # --- Allele String Formatting ---
                 sorted_alleles = sorted(allele_summary.items(), key=lambda item: item[1], reverse=True)[:2]
                 allele_str_parts = []
                 for allele, count in sorted_alleles:
@@ -156,10 +151,13 @@ class CRISPRScopeAnnDataBuilder:
         adata.layers['alleles'] = alleles_matrix
         
         adata.uns['crisprscope_settings'] = self.settings
-        adata.uns['zygosity_encoding'] = {
+        
+        # Convert integer keys to strings for HDF5 compatibility
+        encoding_map = {
             0: 'WT/WT', 1: 'WT/Mut', 2: 'Mut/Mut (Homozygous)', 
             3: 'Mut/Mut2 (Compound Het)', -1: 'NoData'
         }
+        adata.uns['zygosity_encoding'] = {str(k): v for k, v in encoding_map.items()}
         
         logger.info("AnnData object created successfully with all data layers.")
         return adata
