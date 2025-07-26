@@ -6,11 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "crisprscope"
 version = "0.1.0"
 authors = [
-  { name="Chetan Elenki", email="chetan.elenki@utah.edu" },
+  { name="Chetan Elenki", email="chetan.elenki@gmail.com" },
 ]
-description = "A package for processing and analyzing single-cell CRISPR screen data."
+description = "A package for processing and analyzing single-cell CRISPR screen data from direct DNA sequencing."
+# Use the README file for the long description on PyPI
 readme = "README.md"
+# license = { file = "LICENSE" } # add a LICENSE file
 requires-python = ">=3.9"
+keywords = ["crispr", "anndata", "bioinformatics", "single-cell", "genomics", "crispresso"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -30,8 +33,13 @@ dependencies = [
 dev = [
     "pytest",
     "jupyter",
+    "build",
+    "twine",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/elenki/crisprscope"
 "Bug Tracker" = "https://github.com/elenki/crisprscope/issues"
+
+[project.scripts]
+crisprscope = "crisprscope.cli:main"
