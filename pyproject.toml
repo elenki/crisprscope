@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crisprscope"
+version = "0.1.0"
+authors = [
+  { name="Chetan Elenki", email="chetan.elenki@utah.edu" },
+]
+description = "A package for processing and analyzing single-cell CRISPR screen data."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "anndata>=0.10.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "h5py",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "jupyter",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/elenki/crisprscope"
+"Bug Tracker" = "https://github.com/elenki/crisprscope/issues"
