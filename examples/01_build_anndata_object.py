@@ -1,9 +1,9 @@
 """
-CRISPRScope Example 1: Building the AnnData Object Skeleton
+CRISPRScope Example 1: Building and Validating the Full AnnData Object
 
-This script now demonstrates the full data loading pipeline and the initial
-construction of the AnnData object, focusing on the cell (.obs) and
-amplicon (.var) metadata.
+This script demonstrates the complete data loading and AnnData construction
+pipeline, including the parsing of allele data and the population of all
+advanced data layers (.X, counts, zygosity, and alleles).
 """
 from pathlib import Path
 import sys
@@ -17,7 +17,8 @@ from crisprscope.integrator.loaders import (
     load_settings, 
     load_amplicons,
     load_editing_summary,
-    load_quality_scores
+    load_quality_scores,
+    load_crispresso_alleles
 )
 from crisprscope.integrator.builder import CRISPRScopeAnnDataBuilder
 
@@ -31,7 +32,7 @@ def main():
     base_data_path = Path("/uufs/chpc.utah.edu/common/home/u6046470/clement/projects/20230818_scCRISPR/analysis/01_run_on_20200804_BaF3_revision")
 
     print("---" * 15)
-    print("--- CRISPRScope AnnData Builder Test ---")
+    print("--- CRISPRScope AnnData Builder Test (Full) ---")
     print("---" * 15)
 
     # --- Step 1: Load all data sources ---
@@ -42,6 +43,10 @@ def main():
         amplicons_df = load_amplicons(amplicon_file)
         summary_df = load_editing_summary(base_data_path / "settings.txt.filteredEditingSummary.txt")
         scores_df = load_quality_scores(base_data_path / "settings.txt.amplicon_score.txt")
+        
+        # Load the new allele data
+        alleles_data = load_crispresso_alleles(base_data_path / "settings.txt.crispresso.filtered")
+        
         print("✅ Success: All data loaded.")
     except Exception as e:
         print(f"❌ Error during data loading: {e}")
@@ -50,12 +55,13 @@ def main():
     # --- Step 2: Build the AnnData object ---
     print("\n[Step 2/2] Building AnnData object from loaded data...")
     try:
-        # Initialize the builder with our loaded data
+        # Initialize the builder, now including the alleles_data
         builder = CRISPRScopeAnnDataBuilder(
             settings=settings,
             amplicons=amplicons_df,
             editing_summary=summary_df,
-            quality_scores=scores_df
+            quality_scores=scores_df,
+            alleles_data=alleles_data
         )
         
         # Build the object
@@ -69,6 +75,33 @@ def main():
         
         print("\n--- Verifying .var (Amplicon Metadata) ---")
         print(adata.var.head().to_string())
+        
+        print("\n--- Verifying .X (Modification Percentage) ---")
+        print("   - Displaying top-left 5x5 slice:")
+        print(pd.DataFrame(adata.X[:5, :5], 
+                           index=adata.obs_names[:5], 
+                           columns=adata.var_names[:5]))
+
+        print("\n--- Verifying .layers['counts'] (Total Counts) ---")
+        print("   - Displaying top-left 5x5 slice:")
+        print(pd.DataFrame(adata.layers['counts'][:5, :5], 
+                           index=adata.obs_names[:5], 
+                           columns=adata.var_names[:5]))
+                           
+        print("\n--- Verifying .layers['zygosity'] (Zygosity Codes) ---")
+        print("   - Zygosity Encoding:", adata.uns['zygosity_encoding'])
+        print("   - Displaying top-left 5x5 slice:")
+        print(pd.DataFrame(adata.layers['zygosity'][:5, :5], 
+                           index=adata.obs_names[:5], 
+                           columns=adata.var_names[:5]))
+
+        print("\n--- Verifying .layers['alleles'] (Allele Strings) ---")
+        print("   - Displaying top-left 5x5 slice:")
+        # Increase pandas display width to see full allele strings
+        with pd.option_context('display.max_colwidth', 150):
+            print(pd.DataFrame(adata.layers['alleles'][:5, :5], 
+                               index=adata.obs_names[:5], 
+                               columns=adata.var_names[:5]))
 
     except Exception as e:
         print(f"❌ Error during AnnData construction: {e}")
