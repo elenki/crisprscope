@@ -8,7 +8,7 @@ for taking parsed data and assembling it into a structured AnnData object.
 import pandas as pd
 import numpy as np
 from anndata import AnnData
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import logging
 
 from .utils import extract_amplicon_names
@@ -48,13 +48,9 @@ class CRISPRScopeAnnDataBuilder:
         """Constructs the .obs (cell metadata) DataFrame."""
         logger.info("Building .obs DataFrame (cell metadata)...")
         
-        # Start with the index we already have
         obs_df = pd.DataFrame(index=self.cell_barcodes)
-        
-        # Join the quality scores data. We use .reindex to ensure the order is correct.
         obs_df = obs_df.join(self.quality_scores)
         
-        # Fill any missing values for cells that might not be in the scores file
         obs_df.fillna({
             'Amplicon Score': 0.0,
             'Read Count': 0,
@@ -69,15 +65,12 @@ class CRISPRScopeAnnDataBuilder:
         """Constructs the .var (amplicon metadata) DataFrame."""
         logger.info("Building .var DataFrame (amplicon metadata)...")
         
-        # Use the amplicons DataFrame as the base, reindexed to our official list
         var_df = self.amplicons.reindex(self.amplicon_names)
         
-        # We can pre-populate columns for statistics we'll calculate later
         var_df['total_coverage'] = 0
         var_df['average_coverage'] = 0.0
         var_df['editing_efficiency'] = 0.0
         
-        # Calculate summary statistics for each amplicon
         for amp in self.amplicon_names:
             count_col = f'totCount.{amp}'
             mod_col = f'modPct.{amp}'
@@ -88,12 +81,38 @@ class CRISPRScopeAnnDataBuilder:
                 var_df.loc[amp, 'average_coverage'] = counts.mean()
 
             if mod_col in self.editing_summary.columns:
-                 # Calculate efficiency only on cells with coverage
                 mod_pcts = self.editing_summary[mod_col].dropna()
                 var_df.loc[amp, 'editing_efficiency'] = mod_pcts.mean()
 
         logger.info("Finished building .var DataFrame.")
         return var_df
+
+    def _build_data_matrices(self) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Constructs the core data matrices (X and layers) from the editing summary.
+
+        Returns:
+            A tuple containing:
+            - mod_pct_matrix (np.ndarray): Matrix for adata.X (n_obs x n_vars).
+            - counts_matrix (np.ndarray): Matrix for adata.layers['counts'] (n_obs x n_vars).
+        """
+        logger.info("Building core data matrices (X, layers)...")
+        
+        # Create ordered lists of the column names we need to extract
+        mod_pct_cols = [f'modPct.{amp}' for amp in self.amplicon_names]
+        counts_cols = [f'totCount.{amp}' for amp in self.amplicon_names]
+
+        # Select the data in the correct order.
+        # .reindex ensures that if a column is missing, it's created with NaNs.
+        mod_pct_df = self.editing_summary.reindex(columns=mod_pct_cols)
+        counts_df = self.editing_summary.reindex(columns=counts_cols)
+
+        # Convert to NumPy arrays and fill missing values with 0
+        mod_pct_matrix = mod_pct_df.fillna(0).to_numpy(dtype=np.float32)
+        counts_matrix = counts_df.fillna(0).to_numpy(dtype=np.int32)
+
+        logger.info("Finished building core data matrices.")
+        return mod_pct_matrix, counts_matrix
 
     def build(self) -> AnnData:
         """
@@ -106,19 +125,19 @@ class CRISPRScopeAnnDataBuilder:
         
         obs_df = self._build_obs()
         var_df = self._build_var()
-
-        # For now, the primary data matrix X will be a placeholder.
-        # We will populate it and the layers in the next step.
-        placeholder_x = np.zeros((self.n_obs, self.n_vars), dtype=np.float32)
+        mod_pct_matrix, counts_matrix = self._build_data_matrices()
         
         adata = AnnData(
-            X=placeholder_x,
+            X=mod_pct_matrix,
             obs=obs_df,
             var=var_df
         )
 
+        # Add the counts matrix to the layers
+        adata.layers['counts'] = counts_matrix
+        
         # Store the run settings in the .uns slot
         adata.uns['crisprscope_settings'] = self.settings
         
-        logger.info("AnnData object skeleton created successfully.")
+        logger.info("AnnData object created successfully with populated data layers.")
         return adata
