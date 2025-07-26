@@ -59,7 +59,7 @@ def load_amplicons(amplicons_path: Path) -> pd.DataFrame:
     as the index for the DataFrame, making lookups easy.
 
     Args:
-        amplicons_path: The path to the amplicons.txt file.
+        amplicions_path: The path to the amplicons.txt file.
 
     Returns:
         A pandas DataFrame containing amplicon information, indexed by amplicon name.
@@ -73,10 +73,65 @@ def load_amplicons(amplicons_path: Path) -> pd.DataFrame:
     # Assuming the file is tab-separated with a header.
     # We will use the first column as the index.
     try:
-        df = pd.read_csv(amplicons_path, sep='\t', index_col=0)
+        # The header is malformed in the example, so we name the columns explicitly.
+        df = pd.read_csv(amplicons_path, sep='\t', header=None, index_col=0, names=['sequence', 'guide'])
         df.index.name = 'amplicon_name'
         logger.info(f"Successfully loaded {len(df)} amplicons.")
         return df
     except Exception as e:
         logger.error(f"Failed to parse amplicons file: {e}")
+        raise
+
+def load_editing_summary(summary_path: Path) -> pd.DataFrame:
+    """
+    Loads the main data matrix from settings.txt.filteredEditingSummary.txt.
+
+    This file contains the core data: modification percentages and total read
+    counts for every cell at every amplicon.
+
+    Args:
+        summary_path: The path to the filteredEditingSummary.txt file.
+
+    Returns:
+        A pandas DataFrame with cell barcodes as the index and metrics as columns.
+    """
+    if not summary_path.is_file():
+        logger.error(f"Editing summary file not found at: {summary_path}")
+        raise FileNotFoundError(f"Editing summary file not found: {summary_path}")
+
+    logger.info(f"Parsing editing summary from: {summary_path}")
+    try:
+        # The first column is the cell barcode, which we use as the index.
+        df = pd.read_csv(summary_path, sep='\t', index_col=0)
+        df.index.name = 'cell_barcode'
+        logger.info(f"Successfully loaded editing data for {df.shape[0]} cells and {df.shape[1]} metrics.")
+        return df
+    except Exception as e:
+        logger.error(f"Failed to parse editing summary file: {e}")
+        raise
+
+def load_quality_scores(scores_path: Path) -> pd.DataFrame:
+    """
+    Loads the cell quality metrics from settings.txt.amplicon_score.txt.
+
+    Args:
+        scores_path: The path to the amplicon_score.txt file.
+
+    Returns:
+        A pandas DataFrame with cell barcodes as the index and quality scores.
+    """
+    if not scores_path.is_file():
+        logger.error(f"Amplicon scores file not found at: {scores_path}")
+        raise FileNotFoundError(f"Amplicon scores file not found: {scores_path}")
+
+    logger.info(f"Parsing quality scores from: {scores_path}")
+    try:
+        # The first column is the cell barcode.
+        df = pd.read_csv(scores_path, sep='\t', index_col=0)
+        # The file uses 'Unnamed: 0' for the barcode column name, let's fix it.
+        df.index.name = 'cell_barcode'
+        logger.info(f"Successfully loaded quality scores for {len(df)} cells.")
+        return df
+    except Exception as e:
+        logger.error(f"Failed to parse quality scores file: {e}")
         raise
