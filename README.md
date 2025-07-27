@@ -1,26 +1,31 @@
 # CRISPRScope
 
-**CRISPRScope** is a bioinformatics toolkit designed to streamline the analysis of single-cell multiplex CRISPR screens. It processes raw targeted amplicon sequencing data to directly quantify genomic edits, resolving mutational co-occurrence and zygosity at single-cell resolution. The primary output is a standardized AnnData (`.h5ad`) object, integrating raw allele data with quality metrics and experimental metadata for robust downstream analysis and visualization.
+[Work in progress `DRAFT`]
+
+**CRISPRScope** is a bioinformatics toolkit designed to streamline the analysis of single-cell multiplex CRISPR screens. It can process raw targeted amplicon sequencing data to directly quantify genomic edits [TBD: `, resolving mutational co-occurrence and zygosity`] at single-cell resolution. The primary output is a standardized AnnData (`.h5ad`) object, integrating raw allele data with quality metrics and experimental metadata for robust downstream analysis and visualization.
 
 ---
 
-## The Core Innovation
+## Background
 
 Traditional high-content CRISPR screens often infer genomic edits indirectly from transcriptomic (RNA) data, which can be influenced by expression levels and other cellular states.
 
-**CRISPRScope** is built on the methodological advance of using targeted single-cell DNA sequencing to provide direct, unambiguous evidence of genomic edits. This allows for the precise quantification of:
+**CRISPRScope** is built to use targeted single-cell DNA sequencing to provide direct, unambiguous evidence of genomic edits. [TBD: `This allows for the precise quantification of:
 
 - **Multiplexed Edits**: Which combinations of genes are edited in the same cell.
 - **Zygosity**: Whether one (heterozygous) or both (homozygous) copies of a gene are edited.
-- **Clonal Evolution**: How the frequency of these combinations changes under selective pressure.
+- **Clonal Evolution**: How the frequency of these combinations changes under selective pressure.`]
 
 ---
 
 ## Features
 
-- **End-to-End Pipeline**: Handles data processing from CRISPResso2 outputs to an analysis-ready object.  
-- **Standardized Output**: Creates a multi-layered `AnnData` object, the standard for single-cell analysis.  
-- **Rich Data Layers**: Includes layers for modification percentage, read counts, zygosity status, and raw allele sequences.  
+- **End-to-End Pipeline**: Handles processing of raw sequencing data to produce a ready-to-use AnnData object.
+- **Standardized Output**: Creates a multi-layered `AnnData` object that includes:
+  - **Cell Metadata**: Information about each cell, such as cell type, treatment, and experimental conditions.
+  - **Amplicon Metadata**: Details about the amplicons used in the experiment, including gene targets and primer sequences.
+  - [TBD - ` **Zygosity Layer**: Indicates whether each allele is edited (1) or not (0), allowing for easy identification of heterozygous and homozygous edits.`]
+  - [WIP - `**Raw Allele Sequences**: Provides the actual sequences of the alleles, enabling detailed analysis of the edits.`]
 - **Command-Line Interface**: Simple, easy-to-use CLI for running the pipeline.
 
 ---
