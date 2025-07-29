@@ -62,6 +62,10 @@ venv.bak/
 .ipynb_checkpoints
 *.ipynb
 
+# Benchmarks
+*.png
+benchmarks/data/
+
 # Data files
 *.h5ad
 *.csv
