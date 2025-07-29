@@ -26,6 +26,7 @@ dependencies = [
     "h5py~=3.10.0",
     "scipy~=1.11.0",
     "pyyaml~=6.0",      # Added for config file parsing
+    "dnaio~=1.1",
 ]
 
 [project.optional-dependencies]

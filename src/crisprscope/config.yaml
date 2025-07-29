@@ -21,3 +21,7 @@ read_structure:
     barcode_1_end: 35
     barcode_2_start: 50
     barcode_2_end: 59
+
+# Parameters for the Demultiplexer module
+performance_parameters:
+  demultiplexer_chunk_size: 1000000 # Number of reads to process per chunk
