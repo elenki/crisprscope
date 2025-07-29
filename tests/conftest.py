@@ -6,6 +6,7 @@ import pytest
 import pandas as pd
 import numpy as np
 import gzip
+import yaml
 from pathlib import Path
 import random
 import string
@@ -20,6 +21,7 @@ class CRISPRScopeSimulator:
         self.crispresso_dir = self.output_dir / "settings.txt.crispresso.filtered"
         self.crispresso_dir.mkdir(parents=True, exist_ok=True)
         self.cell_barcodes = []
+        self.config = {}
 
     def _generate_barcodes(self, n_cells: int):
         """Generates a list of unique, random 18bp cell barcodes."""
@@ -28,20 +30,92 @@ class CRISPRScopeSimulator:
             bc = ''.join(random.choices("ATCG", k=18))
             barcodes.add(bc)
         self.cell_barcodes = sorted(list(barcodes))
+        # Write the barcodes to a file for the orchestrator to use
+        with open(self.output_dir / "barcodes.txt", "w") as f:
+            for bc in self.cell_barcodes:
+                f.write(f"{bc}\n")
 
+    def _write_config_file(self):
+        """Writes a default config.yaml file for the simulation."""
+        self.config = {
+            'analysis_parameters': {
+                'zygosity': {
+                    'wt_max_mod_pct': 20,
+                    'het_max_mod_pct': 80,
+                    'hom_min_mod_pct': 80,
+                    'compound_het_min_allele2_pct': 20
+                }
+            },
+            'read_structure': {
+                'mission_bio_v2': {
+                    'barcode_1_start': 5,
+                    'barcode_1_end': 14,
+                    'barcode_2_start': 20,
+                    'barcode_2_end': 29
+                }
+            },
+            'performance_parameters': {
+                'demultiplexer_chunk_size': 1_000_000
+            }
+        }
+        with open(self.output_dir / "config.yaml", "w") as f:
+            yaml.dump(self.config, f)
+        
     def _write_settings_file(self, amplicons_path: Path):
-        """Writes a minimal settings.txt file."""
-        settings_content = f"amplicons\t{amplicons_path}\n"
+        r1_path = self.output_dir / "R1.fastq.gz"
+        r2_path = self.output_dir / "R2.fastq.gz"
+        barcodes_path = self.output_dir / "barcodes.txt"
+        settings_content = (
+            f"r1\t{r1_path}\n"
+            f"r2\t{r2_path}\n"
+            f"barcodes\t{barcodes_path}\n"
+            f"amplicons\t{amplicons_path}\n"
+        )
         with open(self.output_dir / "settings.txt", "w") as f:
             f.write(settings_content)
 
     def _write_amplicons_file(self, amplicon_specs: dict) -> Path:
-        """Writes the amplicons.txt file."""
         path = self.output_dir / "amplicons.txt"
         with open(path, "w") as f:
             for name, seq in amplicon_specs.items():
                 f.write(f"{name}\t{seq}\tNA\n")
         return path
+
+    def _write_raw_fastqs(self, edit_scenarios: list):
+        """Generates raw R1 and R2 fastq files from edit scenarios."""
+        r1_path = self.output_dir / "R1.fastq.gz"
+        r2_path = self.output_dir / "R2.fastq.gz"
+        
+        bc_params = self.config['read_structure']['mission_bio_v2']
+        read_len = 50 # Arbitrary length for the rest of the read
+
+        with gzip.open(r1_path, "wt") as f1, gzip.open(r2_path, "wt") as f2:
+            read_counter = 0
+            for scenario in edit_scenarios:
+                full_barcode = self.cell_barcodes[scenario['cell_id']]
+                bc1 = full_barcode[:9]
+                bc2 = full_barcode[9:]
+
+                for allele_seq, count in scenario['alleles'].items():
+                    for _ in range(count):
+                        # Construct R1 read with embedded barcodes
+                        r1_seq_list = ['N'] * read_len
+                        r1_seq_list[bc_params['barcode_1_start']:bc_params['barcode_1_end']] = list(bc1)
+                        r1_seq_list[bc_params['barcode_2_start']:bc_params['barcode_2_end']] = list(bc2)
+                        r1_seq = "".join(r1_seq_list)
+                        
+                        # R2 read is just the allele
+                        r2_seq = allele_seq
+
+                        # Write FASTQ records
+                        read_id = f"@READ_{read_counter}"
+                        qual = "F" * len(r1_seq)
+                        f1.write(f"{read_id}\n{r1_seq}\n+\n{qual}\n")
+                        
+                        qual = "F" * len(r2_seq)
+                        f2.write(f"{read_id}\n{r2_seq}\n+\n{qual}\n")
+                        
+                        read_counter += 1
 
     def _write_crispresso_fastqs(self, edit_scenarios: list, amplicon_specs: dict):
         """Generates and writes the gzipped FASTQ files for each amplicon."""
@@ -107,27 +181,29 @@ class CRISPRScopeSimulator:
         score_df.index.name = "Unnamed: 0"
         score_df.to_csv(self.output_dir / "settings.txt.amplicon_score.txt", sep="\t")
 
-
-    def generate(self, n_cells: int, amplicon_specs: dict, edit_scenarios: list):
+    def generate(self, n_cells: int, amplicon_specs: dict, edit_scenarios: list, generate_raw_fastq: bool = False):
         """Main method to orchestrate the generation of all test files."""
         self._generate_barcodes(n_cells)
+        self._write_config_file()
         amplicons_path = self._write_amplicons_file(amplicon_specs)
         self._write_settings_file(amplicons_path)
+        
+        if generate_raw_fastq:
+            self._write_raw_fastqs(edit_scenarios)
+        
+        # Always generate the post-crispresso files for integrator tests
         self._write_crispresso_fastqs(edit_scenarios, amplicon_specs)
         self._write_summary_files(edit_scenarios, amplicon_specs)
 
 
 @pytest.fixture
 def simulation_factory(tmp_path):
-    """
-    A pytest fixture that returns a factory function for creating
-    CRISPRScope simulation directories.
-    """
-    def _create_simulation(n_cells: int, amplicon_specs: dict, edit_scenarios: list) -> Path:
+    """A pytest fixture that returns a factory for creating simulation directories."""
+    def _create_simulation(n_cells: int, amplicon_specs: dict, edit_scenarios: list, generate_raw_fastq: bool = False) -> Path:
         sim_path = tmp_path / "simulation"
         sim_path.mkdir()
         simulator = CRISPRScopeSimulator(output_dir=sim_path)
-        simulator.generate(n_cells, amplicon_specs, edit_scenarios)
+        simulator.generate(n_cells, amplicon_specs, edit_scenarios, generate_raw_fastq)
         return sim_path
         
     return _create_simulation
