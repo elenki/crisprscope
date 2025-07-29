@@ -35,6 +35,7 @@ dev = [
     "jupyter",
     "build",
     "twine",
+    "matplotlib",
 ]
 
 [project.urls]
