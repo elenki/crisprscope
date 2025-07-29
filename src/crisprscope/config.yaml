@@ -1,0 +1,23 @@
+# CRISPRScope Parameters
+
+# Parameters for the Integrator/Builder module
+analysis_parameters:
+  zygosity:
+    # % modification reads to be considered WT/WT
+    wt_max_mod_pct: 20
+    # % modification reads to be considered WT/Mut
+    het_max_mod_pct: 80
+    # % modification reads to be considered homozygous/compound het
+    hom_min_mod_pct: 80
+    # For calls >= hom_min_mod_pct, the % of the second allele
+    # required to be called a compound heterozygote (Mut/Mut2)
+    compound_het_min_allele2_pct: 20
+
+# Parameters for the Orchestrator module
+read_structure:
+  # Naming a preset allows for adding others later (e.g., mission_bio_v3)
+  mission_bio_v2:
+    barcode_1_start: 26
+    barcode_1_end: 35
+    barcode_2_start: 50
+    barcode_2_end: 59

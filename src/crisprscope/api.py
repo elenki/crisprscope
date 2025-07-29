@@ -4,6 +4,10 @@ CRISPRScope: High-level API for building and saving AnnData objects.
 
 import logging
 from pathlib import Path
+from typing import Dict, Any
+import yaml
+from importlib import resources
+
 from anndata import AnnData
 
 from .integrator.loaders import (
@@ -17,7 +21,30 @@ from .integrator.builder import CRISPRScopeAnnDataBuilder
 
 logger = logging.getLogger(__name__)
 
-def build_anndata(base_path: str, output_path: str = None) -> AnnData:
+def _load_config(config_path: str = None) -> Dict[str, Any]:
+    """
+    Loads a YAML config, using the package default if no path is provided.
+    
+    This helper function centralizes the config loading logic.
+    """
+    if config_path:
+        config_file = Path(config_path)
+        logger.info(f"Loading user-provided config from: {config_file}")
+        if not config_file.is_file():
+            raise FileNotFoundError(f"Custom config file not found: {config_path}")
+    else:
+        # This is the modern, robust way to find a file inside your installed package.
+        # It works correctly for wheels, eggs, and editable installs.
+        logger.info("No custom config provided. Loading package default.")
+        config_file = resources.files('crisprscope').joinpath('config.yaml')
+
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    return config
+
+
+def build_anndata(base_path: str, output_path: str = None, config_path: str = None) -> AnnData:
     """
     Builds and optionally saves a CRISPRScope AnnData object from a
     CRISPResso2 output directory.
@@ -29,11 +56,21 @@ def build_anndata(base_path: str, output_path: str = None) -> AnnData:
                    and 'settings.txt.crispresso.filtered' subdirectories.
         output_path: Optional. If provided, the path to save the final
                      .h5ad object.
+        config_path: Optional. Path to a custom YAML config file. If not
+                     provided, the package default is used.
 
     Returns:
         The fully constructed AnnData object.
     """
     logger.info(f"--- Starting CRISPRScope Integrator ---")
+    
+    # --- 0. Load Configuration ---
+    try:
+        config = _load_config(config_path)
+    except Exception as e:
+        logger.error(f"❌ Failed during configuration loading: {e}", exc_info=True)
+        raise
+    
     logger.info(f"Processing data from: {base_path}")
 
     # --- 1. Load all data sources ---
@@ -55,6 +92,7 @@ def build_anndata(base_path: str, output_path: str = None) -> AnnData:
     logger.info("Step 2/2: Building AnnData object...")
     try:
         builder = CRISPRScopeAnnDataBuilder(
+            config=config,
             settings=settings,
             amplicons=amplicons_df,
             editing_summary=summary_df,
@@ -72,7 +110,6 @@ def build_anndata(base_path: str, output_path: str = None) -> AnnData:
         logger.info(f"Saving AnnData object to: {output_path}")
         try:
             output_file = Path(output_path)
-            # Ensure the parent directory exists
             output_file.parent.mkdir(parents=True, exist_ok=True)
             adata.write_h5ad(output_file, compression="gzip")
             logger.info(f"✅ AnnData object saved successfully.")

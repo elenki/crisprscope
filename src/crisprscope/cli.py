@@ -6,6 +6,8 @@ This module provides the main entry point for running CRISPRScope from the termi
 
 import argparse
 import logging
+from pathlib import Path
+
 from .api import build_anndata
 
 def main():
@@ -15,11 +17,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="CRISPRScope: A toolkit for analyzing single-cell CRISPR screen data."
     )
-    # Add a version argument
     parser.add_argument(
         '-v', '--version',
         action='version',
-        version='%(prog)s 0.1.0'
+        version='%(prog)s 0.1.0'  # Consider pulling this from __init__.py later
     )
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
@@ -42,6 +43,12 @@ def main():
         help="Path for the output .h5ad file."
     )
     parser_build.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Optional path to a custom YAML config file for methodological parameters. If not provided, the package default is used."
+    )
+    parser_build.add_argument(
         "--verbose",
         action="store_true",
         help="Enable detailed logging output."
@@ -59,7 +66,11 @@ def main():
     # --- Execute Command ---
     if args.command == "build":
         try:
-            build_anndata(base_path=args.input, output_path=args.output)
+            build_anndata(
+                base_path=args.input, 
+                output_path=args.output,
+                config_path=args.config  # Pass the new argument to the API
+            )
             print(f"\n✅ Success! AnnData object saved to: {args.output}")
         except Exception as e:
             logging.error(f"An error occurred during the build process: {e}", exc_info=args.verbose)
