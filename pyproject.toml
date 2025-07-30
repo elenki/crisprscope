@@ -27,6 +27,7 @@ dependencies = [
     "scipy~=1.11.0",
     "pyyaml~=6.0",      # Added for config file parsing
     "dnaio~=1.1",
+    "pyarrow~=15.0",
 ]
 
 [project.optional-dependencies]
