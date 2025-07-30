@@ -3,53 +3,29 @@ CRISPRScope: AnnData Builder
 
 This module contains the CRISPRScopeAnnDataBuilder class, which is responsible
 for taking parsed data and assembling it into a structured AnnData object
-using efficient, vectorized operations.
+using efficient, vectorized operations and iterative loading for scalability.
 """
 
 import pandas as pd
 import numpy as np
 from anndata import AnnData
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, List
+from pathlib import Path
 import logging
 
 from .utils import extract_amplicon_names
 
 logger = logging.getLogger(__name__)
 
-
-def _get_top_two_alleles(group: pd.DataFrame) -> pd.Series:
-    """Helper function for .apply() to get top 2 alleles from a group."""
-    top1 = group.iloc[0]
-    seq2, freq2 = "", 0.0
-    if len(group) > 1:
-        top2 = group.iloc[1]
-        seq2 = top2['allele_sequence']
-        freq2 = top2['frequency']
-    return pd.Series({
-        'allele_seq_1': top1['allele_sequence'],
-        'allele_freq_1': top1['frequency'],
-        'allele_seq_2': seq2,
-        'allele_freq_2': freq2
-    })
-
-
 class CRISPRScopeAnnDataBuilder:
     """
     Assembles a CRISPRScope AnnData object from loaded data sources.
     """
-    def __init__(self, config: Dict[str, Any], settings: Dict[str, Any], 
-                 amplicons: pd.DataFrame, editing_summary: pd.DataFrame, 
-                 quality_scores: pd.DataFrame, alleles_data: pd.DataFrame):
+    def __init__(self, config: Dict[str, Any], settings: Dict[str, Any],
+                 amplicons: pd.DataFrame, editing_summary: pd.DataFrame,
+                 quality_scores: pd.DataFrame, allele_parquet_paths: List[Path]):
         """
         Initializes the builder with all necessary data and configuration.
-
-        Args:
-            config: Parsed methodological parameters from config.yaml.
-            settings: Parsed data from settings.txt.
-            amplicons: Parsed data from amplicons.txt.
-            editing_summary: Parsed data from filteredEditingSummary.txt.
-            quality_scores: Parsed data from amplicon_score.txt.
-            alleles_data: DataFrame of parsed allele counts from CRISPResso output.
         """
         logger.info("Initializing AnnData Builder...")
         self.config = config
@@ -57,13 +33,18 @@ class CRISPRScopeAnnDataBuilder:
         self.amplicons = amplicons
         self.editing_summary = editing_summary
         self.quality_scores = quality_scores
-        self.alleles_df = alleles_data
+        self.allele_parquet_paths = allele_parquet_paths
 
         self.cell_barcodes = self.editing_summary.index.tolist()
         self.amplicon_names = extract_amplicon_names(self.editing_summary)
         
         self.n_obs = len(self.cell_barcodes)
         self.n_vars = len(self.amplicon_names)
+
+        # create index maps for efficient numpy array population
+        self._cell_map = {name: i for i, name in enumerate(self.cell_barcodes)}
+        self._amp_map = {name: i for i, name in enumerate(self.amplicon_names)}
+        
         logger.info(f"Builder configured for {self.n_obs} cells and {self.n_vars} amplicons.")
 
     def _build_obs(self) -> pd.DataFrame:
@@ -73,15 +54,15 @@ class CRISPRScopeAnnDataBuilder:
         obs_df.index = obs_df.index.astype(str)
         obs_df = obs_df.join(self.quality_scores)
         obs_df.fillna({
-            'Amplicon Score': 0.0, 
-            'Read Count': 0, 
-            'Barcode Rank': -1, 
+            'Amplicon Score': 0.0,
+            'Read Count': 0,
+            'Barcode Rank': -1,
             'Color': 'Unknown'
         }, inplace=True)
         return obs_df
 
     def _build_var(self) -> pd.DataFrame:
-        """Constructs the .var (amplicon metadata) DataFrame using vectorized operations."""
+        """Constructs the .var (amplicon metadata) DataFrame."""
         logger.info("Building .var DataFrame (amplicon metadata)...")
         var_df = self.amplicons.reindex(self.amplicon_names)
         
@@ -118,44 +99,56 @@ class CRISPRScopeAnnDataBuilder:
         
         return {'X': mod_pct_matrix, 'counts': counts_matrix}
 
-    def _process_alleles_for_layers(self) -> Dict[str, np.ndarray]:
-        """Processes the long-format allele DataFrame into wide-format matrices."""
-        logger.info("Processing allele data into structured layers...")
-        if self.alleles_df.empty:
-            logger.warning("Alleles DataFrame is empty. Advanced layers will be empty.")
-            shape = (self.n_obs, self.n_vars)
-            return {
-                'allele_seq_1': np.full(shape, '', dtype='S1'),
-                'allele_freq_1': np.zeros(shape, dtype=np.float32),
-                'allele_seq_2': np.full(shape, '', dtype='S1'),
-                'allele_freq_2': np.zeros(shape, dtype=np.float32),
-                'second_allele_freq': np.zeros(shape, dtype=np.float32)
-            }
-
-        self.alleles_df['total_reads'] = self.alleles_df.groupby(['cell_barcode', 'amplicon_name'])['count'].transform('sum')
-        self.alleles_df['frequency'] = (self.alleles_df['count'] / self.alleles_df['total_reads']) * 100
-        sorted_alleles = self.alleles_df.sort_values('frequency', ascending=False)
-        top_alleles_df = sorted_alleles.groupby(['cell_barcode', 'amplicon_name'], observed=True).apply(_get_top_two_alleles)
-
-        if top_alleles_df.empty:
-             logger.warning("Processing yielded no allele data. Returning empty DataFrame.")
-             return {}
-             
-        layers = {col: top_alleles_df[col].unstack(fill_value=0 if 'freq' in col else '') for col in top_alleles_df.columns}
-        second_allele_freq_matrix = layers['allele_freq_2'].reindex(index=self.cell_barcodes, columns=self.amplicon_names).fillna(0).to_numpy(dtype=np.float32)
-
-        max_len = self.alleles_df["allele_sequence"].str.len().max()
-        seq_dtype = f'S{int(max_len)}' if pd.notna(max_len) else 'S1'
+    def _build_allele_layers_iteratively(self) -> Dict[str, np.ndarray]:
+        """
+        Iteratively processes Parquet files to build allele layers, keeping
+        memory usage low. This is the new, scalable approach.
+        """
+        logger.info("Iteratively building allele layers from intermediate Parquet files...")
         
-        processed_layers = {}
-        for name, df in layers.items():
-            matrix = df.reindex(index=self.cell_barcodes, columns=self.amplicon_names)
-            dtype = seq_dtype if 'seq' in name else np.float32
-            fill_value = '' if 'seq' in name else 0
-            processed_layers[name] = matrix.fillna(fill_value).to_numpy(dtype=dtype)
+        shape = (self.n_obs, self.n_vars)
+        allele_layers = {
+            'allele_seq_1': np.full(shape, '', dtype=object),
+            'allele_freq_1': np.zeros(shape, dtype=np.float32),
+            'allele_seq_2': np.full(shape, '', dtype=object),
+            'allele_freq_2': np.zeros(shape, dtype=np.float32),
+            'second_allele_freq': np.zeros(shape, dtype=np.float32)
+        }
+
+        max_len_seen = 1
+        for path in self.allele_parquet_paths:
+            df = pd.read_parquet(path)
+            if df.empty:
+                continue
+            
+            df['total_reads'] = df.groupby(['cell_barcode', 'amplicon_name'], observed=True)['count'].transform('sum')
+            df['frequency'] = (df['count'] / df['total_reads']) * 100
+            df.sort_values('frequency', ascending=False, inplace=True)
+            
+            for (cell_bc, amp_name), group in df.groupby(['cell_barcode', 'amplicon_name'], observed=True):
+                row_idx = self._cell_map.get(str(cell_bc))
+                col_idx = self._amp_map.get(str(amp_name))
+
+                if row_idx is None or col_idx is None:
+                    continue
+
+                top1 = group.iloc[0]
+                allele_layers['allele_seq_1'][row_idx, col_idx] = top1['allele_sequence']
+                allele_layers['allele_freq_1'][row_idx, col_idx] = top1['frequency']
+                max_len_seen = max(max_len_seen, len(top1['allele_sequence']))
+
+                if len(group) > 1:
+                    top2 = group.iloc[1]
+                    allele_layers['allele_seq_2'][row_idx, col_idx] = top2['allele_sequence']
+                    allele_layers['allele_freq_2'][row_idx, col_idx] = top2['frequency']
+                    allele_layers['second_allele_freq'][row_idx, col_idx] = top2['frequency']
+                    max_len_seen = max(max_len_seen, len(top2['allele_sequence']))
         
-        processed_layers['second_allele_freq'] = second_allele_freq_matrix
-        return processed_layers
+        for key in ['allele_seq_1', 'allele_seq_2']:
+            allele_layers[key] = np.char.encode(allele_layers[key].astype(str), 'utf-8').astype(f'S{max_len_seen}')
+
+        logger.info("Allele layers built successfully.")
+        return allele_layers
 
     def build(self) -> AnnData:
         """Builds the final AnnData object."""
@@ -164,16 +157,14 @@ class CRISPRScopeAnnDataBuilder:
         obs_df = self._build_obs()
         var_df = self._build_var()
         main_layers = self._build_main_layers()
-        allele_layers = self._process_alleles_for_layers()
+        allele_layers = self._build_allele_layers_iteratively()
 
         logger.info("Calculating zygosity using vectorized, configured parameters...")
         mod_pct_matrix = main_layers['X']
-        second_allele_freq = allele_layers.get('second_allele_freq', np.zeros_like(mod_pct_matrix))
+        second_allele_freq = allele_layers['second_allele_freq']
         
-        # --- PARAMETERIZED LOGIC ---
-        # Read thresholds from the config dictionary instead of hardcoding them
         zyg_params = self.config['analysis_parameters']['zygosity']
-        cond_wt = mod_pct_matrix < zyg_params['wt_max_mod_pct']
+        cond_wt = mod_pct_matrix <= zyg_params['wt_max_mod_pct']
         cond_hom = (mod_pct_matrix >= zyg_params['hom_min_mod_pct']) & (second_allele_freq < zyg_params['compound_het_min_allele2_pct'])
         cond_comp_het = (mod_pct_matrix >= zyg_params['hom_min_mod_pct']) & (second_allele_freq >= zyg_params['compound_het_min_allele2_pct'])
         
@@ -183,7 +174,6 @@ class CRISPRScopeAnnDataBuilder:
             default=1
         ).astype(np.int8)
 
-        # Create the AnnData object
         adata = AnnData(X=main_layers['X'], obs=obs_df, var=var_df)
         adata.layers['counts'] = main_layers['counts']
         adata.layers['zygosity'] = zygosity_matrix
